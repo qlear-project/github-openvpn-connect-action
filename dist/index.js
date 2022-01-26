@@ -857,7 +857,7 @@ const run = (callback) => {
   const timer = setTimeout(() => {
     core.setFailed('VPN connection failed.')
     tail.unwatch()
-  }, 15000)
+  }, 15000 * 4)
 }
 
 module.exports = run
