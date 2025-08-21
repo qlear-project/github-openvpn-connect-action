@@ -812,17 +812,20 @@ const run = (callback) => {
   if (username && password) {
     fs.appendFileSync(configFile, 'auth-user-pass up.txt\n')
     fs.writeFileSync('up.txt', [username, password].join('\n'))
+    fs.chmodSync('up.txt', 0o600)
   }
 
   // client certificate auth
   if (clientKey) {
     fs.appendFileSync(configFile, 'key client.key\n')
     fs.writeFileSync('client.key', clientKey)
+    fs.chmodSync('client.key', 0o600)
   }
 
   if (tlsAuthKey) {
     fs.appendFileSync(configFile, 'tls-auth ta.key 1\n')
     fs.writeFileSync('ta.key', tlsAuthKey)
+    fs.chmodSync('ta.key', 0o600)
   }
 
   core.info('========== begin configuration ==========')
