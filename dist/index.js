@@ -805,50 +805,55 @@ const run = (callback) => {
   }
 
   // 1. Configure client
+  const originalConfig = fs.readFileSync(configFile, 'utf8')
+  let modifiedConfig = originalConfig + '\n# ----- modified by action -----\n'
 
-  fs.appendFileSync(configFile, '\n# ----- modified by action -----\n')
+  // Add modern cipher settings to prevent negotiation issues
+  modifiedConfig += 'data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305:AES-256-CBC\n'
+  modifiedConfig += 'data-ciphers-fallback AES-256-CBC\n'
 
   // username & password auth
   if (username && password) {
-    fs.appendFileSync(configFile, 'auth-user-pass up.txt\n')
+    modifiedConfig += 'auth-user-pass up.txt\n'
     fs.writeFileSync('up.txt', [username, password].join('\n'))
     fs.chmodSync('up.txt', 0o600)
   }
 
   // client certificate auth
   if (clientKey) {
-    fs.appendFileSync(configFile, 'key client.key\n')
+    modifiedConfig += 'key client.key\n'
     fs.writeFileSync('client.key', clientKey)
     fs.chmodSync('client.key', 0o600)
   }
 
   if (tlsAuthKey) {
-    fs.appendFileSync(configFile, 'tls-auth ta.key 1\n')
+    modifiedConfig += 'tls-auth ta.key 1\n'
     fs.writeFileSync('ta.key', tlsAuthKey)
     fs.chmodSync('ta.key', 0o600)
   }
 
-  core.info('========== begin configuration ==========')
-  core.info(fs.readFileSync(configFile, 'utf8'))
-  core.info('=========== end configuration ===========')
+  // Write modified config to temporary file
+  const tempConfigFile = 'temp_config.ovpn'
+  fs.writeFileSync(tempConfigFile, modifiedConfig)
 
-  // 2. Run openvpn
-
-  // prepare log file
+  // 2. Run openvpn with increased timeout awareness
   fs.writeFileSync('openvpn.log', '')
   const tail = new Tail('openvpn.log')
 
   try {
-    exec(`sudo openvpn --config ${configFile} --daemon --log openvpn.log --writepid openvpn.pid`)
+    exec(`sudo openvpn --config ${tempConfigFile} --daemon --log openvpn.log --writepid openvpn.pid`)
   } catch (error) {
     core.error(fs.readFileSync('openvpn.log', 'utf8'))
     tail.unwatch()
     throw error
   }
 
+  let connected = false;
+
   tail.on('line', (data) => {
     core.info(data)
     if (data.includes('Initialization Sequence Completed')) {
+      connected = true
       tail.unwatch()
       clearTimeout(timer)
       const pid = fs.readFileSync('openvpn.pid', 'utf8').trim()
@@ -857,10 +862,20 @@ const run = (callback) => {
     }
   })
 
+  // Increase timeout to account for potential retries
   const timer = setTimeout(() => {
-    core.setFailed('VPN connection failed.')
-    tail.unwatch()
-  }, 60 * 1000)
+    if (!connected) {
+      core.setFailed('VPN connection failed - timeout after 120 seconds')
+      tail.unwatch()
+
+      // Clean up any hanging process
+      try {
+        exec('sudo pkill openvpn || true')
+      } catch (e) {
+        // Ignore cleanup errors
+      }
+    }
+  }, 120000) // 120 seconds instead of 60
 }
 
 module.exports = run
