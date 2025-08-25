@@ -25259,7 +25259,8 @@ const run = (callback) => {
     fs.writeFileSync("tcv2.key", tlsCryptV2Key, { mode: 0o600 });
   }
 
-  fs.appendFileSync(configFile, "data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305\n");
+  fs.appendFileSync(configFile, "data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305:AES-256-CBC\n");
+  fs.appendFileSync(configFile, "cipher AES-256-CBC\n");
   fs.appendFileSync(configFile, "data-ciphers-fallback AES-256-CBC\n");
   fs.appendFileSync(configFile, "nobind\n");
   fs.appendFileSync(configFile, "persist-key\n");
