@@ -59,6 +59,10 @@ const run = (callback) => {
   if (tlsAuthKey) {
     fs.appendFileSync(configFile, "tls-auth ta.key 1\n");
     fs.writeFileSync("ta.key", tlsAuthKey, { mode: 0o600 });
+  } else {
+    // Add this as a fallback if tlsAuthKey is not provided
+    fs.appendFileSync(configFile, "tls-client\n");
+    fs.appendFileSync(configFile, "remote-cert-tls server\n");
   }
 
   if (tlsCryptKey) {
@@ -70,6 +74,16 @@ const run = (callback) => {
     fs.appendFileSync(configFile, "tls-crypt-v2 tcv2.key 1\n");
     fs.writeFileSync("tcv2.key", tlsCryptV2Key, { mode: 0o600 });
   }
+
+  fs.appendFileSync(configFile, "data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305\n");
+  fs.appendFileSync(configFile, "data-ciphers-fallback AES-256-CBC\n");
+  fs.appendFileSync(configFile, "nobind\n");
+  fs.appendFileSync(configFile, "persist-key\n");
+  fs.appendFileSync(configFile, "persist-tun\n");
+  fs.appendFileSync(configFile, "comp-lzo no\n");
+  fs.appendFileSync(configFile, "verb 3\n");
+  fs.appendFileSync(configFile, "connect-retry 5\n");
+  fs.appendFileSync(configFile, "connect-retry-max 10\n");
 
   if (echoConfig === "true") {
     core.info("========== begin configuration ==========");
