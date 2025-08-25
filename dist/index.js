@@ -808,14 +808,14 @@ const run = (callback) => {
   const originalConfig = fs.readFileSync(configFile, 'utf8')
   let modifiedConfig = originalConfig + '\n# ----- modified by action -----\n'
 
-  // // Add modern cipher settings to prevent negotiation issues
-  // modifiedConfig += 'data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305\n'
-  // modifiedConfig += 'data-ciphers-fallback AES-256-CBC\n'
+  // Add modern cipher settings to prevent negotiation issues
+  modifiedConfig += 'data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305\n'
+  modifiedConfig += 'data-ciphers-fallback AES-256-CBC\n'
 
-  // // Add certificate verification if missing
-  // if (!modifiedConfig.includes('verify-x509-name') && !modifiedConfig.includes('remote-cert-tls')) {
-  //   modifiedConfig += 'remote-cert-tls server\n'
-  // }
+  // Add certificate verification if missing
+  if (!modifiedConfig.includes('verify-x509-name') && !modifiedConfig.includes('remote-cert-tls')) {
+    modifiedConfig += 'remote-cert-tls server\n'
+  }
 
   // username & password auth
   if (username && password) {
