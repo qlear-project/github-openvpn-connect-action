@@ -25316,7 +25316,7 @@ function testVpnConnection(ip, port) {
   try {
     // Test with netcat (TCP connectivity)
     core.info("Testing TCP connectivity with netcat...");
-    const ncResult = exec(`timeout 5 nc -zv ${ip} ${port}`, { encoding: 'utf8' });
+    const ncResult = exec(`timeout 15 nc -zv ${ip} ${port}`, { encoding: 'utf8' });
     core.info(`Netcat test result:\n${ncResult}`);
   } catch (error) {
     core.warning(`Netcat connection test failed: ${error.message}`);
