@@ -126,7 +126,10 @@ function testVpnConnection(ip, port) {
     core.info("Testing ping connectivity...");
     const pingResult = exec(`ping -c 4 -W 2 ${ip}`, { encoding: 'utf8' });
     core.info(`Ping test result:\n${pingResult}`);
-
+  } catch (error) {
+    core.warning(`Connection test failed: ${error.message}`);
+  }
+  try {
     // Test TCP connectivity to the port
     core.info(`Testing TCP connectivity to port ${port}...`);
     const timeout = 10000; // 10 seconds timeout
