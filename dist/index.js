@@ -804,23 +804,55 @@ const run = (callback) => {
     throw new Error(`config file '${configFile}' not found`)
   }
 
-  // Read original config and create a modified version
+  // Read original config and extract remote server info
   const originalConfig = fs.readFileSync(configFile, 'utf8')
-  let modifiedConfig = originalConfig + '\n# ----- modified by action -----\n'
+  
+  // Extract remote server information from config
+  const remoteMatch = originalConfig.match(/^remote\s+(\S+)\s+(\d+)(?:\s+(\S+))?/m)
+  let vpnServer = null
+  let vpnPort = null
+  let vpnProto = null
 
-  // Add modern cipher settings to prevent negotiation issues
-  modifiedConfig += 'data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305\n'
-  modifiedConfig += 'data-ciphers-fallback AES-256-CBC\n'
-
-  // Add certificate verification if missing
-  if (!modifiedConfig.includes('verify-x509-name') && !modifiedConfig.includes('remote-cert-tls')) {
-    modifiedConfig += 'remote-cert-tls server\n'
+  if (remoteMatch) {
+    vpnServer = remoteMatch[1]
+    vpnPort = remoteMatch[2]
+    vpnProto = remoteMatch[3] || 'udp' // default to udp if not specified
+    core.info(`Found VPN server: ${vpnServer}:${vpnPort} (${vpnProto})`)
+  } else {
+    throw new Error('No remote server found in OpenVPN config file')
   }
+
+  // Create modified config with critical fixes
+  let modifiedConfig = originalConfig + '\n# ----- modified by action -----\n'
+  
+  // Remove any existing compression settings that cause warnings
+  modifiedConfig = modifiedConfig.replace(/^comp-lzo.*$/gm, '')
+  modifiedConfig = modifiedConfig.replace(/^compress.*$/gm, '')
+  
+  // Add critical security and connection settings
+  modifiedConfig += 'nobind\n'
+  modifiedConfig += 'persist-key\n'
+  modifiedConfig += 'persist-tun\n'
+  modifiedConfig += 'remote-cert-tls server\n'
+  
+  // Modern cipher settings (critical for OpenVPN 2.6+)
+  modifiedConfig += 'data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305:AES-256-CBC:AES-128-CBC\n'
+  modifiedConfig += 'data-ciphers-fallback AES-256-CBC\n'
+  
+  // Increase TLS timeout by modifying tun MTU (workaround)
+  modifiedConfig += 'tun-mtu 1500\n'
+  modifiedConfig += 'fragment 1300\n'
+  modifiedConfig += 'mssfix 1300\n'
+  
+  // Connection reliability settings
+  modifiedConfig += 'connect-retry 2\n'
+  modifiedConfig += 'connect-retry-max 3\n'
+  modifiedConfig += 'resolv-retry 60\n'
 
   // username & password auth
   if (username && password) {
     modifiedConfig += 'auth-user-pass up.txt\n'
-    fs.writeFileSync('up.txt', [username, password].join('\n'))
+    fs.writeFileSync('up.txt', `${username}\n${password}`)
     fs.chmodSync('up.txt', 0o600)
   }
 
@@ -837,29 +869,68 @@ const run = (callback) => {
     fs.chmodSync('ta.key', 0o600)
   }
 
-  // Write the modified config to a new file
+  // Write the modified config
   const tempConfigFile = 'modified_config.ovpn'
   fs.writeFileSync(tempConfigFile, modifiedConfig)
 
-  core.info('========== begin configuration ==========')
+  core.info('========== VPN Configuration ==========')
   core.info(modifiedConfig)
-  core.info('=========== end configuration ===========')
+  core.info('========================================')
 
-  // 2. Run openvpn with increased timeout
+  // Run network diagnostics using the extracted server info
+  core.info('Running network diagnostics...')
+  try {
+    const pingResult = exec(`ping -c 3 -W 2 ${vpnServer} 2>&1 || true`, { silent: true }).stdout
+    core.info(`Ping results for ${vpnServer}: ${pingResult.includes('time=') ? 'SUCCESS' : 'FAILED'}`)
+    
+    if (pingResult.includes('time=')) {
+      core.info(`Ping successful to ${vpnServer}`)
+    } else {
+      core.warning(`Ping failed to ${vpnServer}`)
+    }
+    
+    // Check port connectivity
+    const portCheck = exec(`timeout 3 nc -zv ${vpnServer} ${vpnPort} 2>&1 || true`, { silent: true }).stdout
+    core.info(`Port ${vpnPort} check: ${portCheck.includes('succeeded') ? 'SUCCESS' : 'FAILED'}`)
+    
+    // Check general internet connectivity
+    const curlResult = exec('timeout 5 curl -s http://ifconfig.io 2>&1 || true', { silent: true }).stdout
+    core.info(`External connectivity: ${curlResult ? 'SUCCESS' : 'FAILED'}`)
+    
+  } catch (error) {
+    core.warning(`Diagnostics failed: ${error.message}`)
+  }
+
+  // 2. Run openvpn in foreground for better debugging
   fs.writeFileSync('openvpn.log', '')
-  const tail = new Tail('openvpn.log')
+  
+  let openvpnProcess
+  let connected = false
 
   try {
-    // Use the modified config and add connection timeout options
-    exec(`sudo openvpn --config ${tempConfigFile} --daemon --log openvpn.log --writepid openvpn.pid --connect-timeout 120 --connect-retry 5 --connect-retry-max 3`)
+    // Run in foreground to capture real-time output
+    openvpnProcess = exec(`sudo openvpn --config ${tempConfigFile} --log openvpn.log`, { 
+      async: true,
+      silent: true 
+    })
+    
+    // Capture stderr
+    openvpnProcess.stderr.on('data', (data) => {
+      const message = data.toString().trim()
+      if (message) {
+        core.info(`OpenVPN STDERR: ${message}`)
+        fs.appendFileSync('openvpn.log', `STDERR: ${message}\n`)
+      }
+    })
+
   } catch (error) {
-    core.error(fs.readFileSync('openvpn.log', 'utf8'))
-    tail.unwatch()
+    core.error(`Failed to start OpenVPN: ${error}`)
     throw error
   }
 
-  let connected = false;
-  let errorDetected = false;
+  // Watch the log file
+  const tail = new Tail('openvpn.log')
+  const startTime = Date.now()
 
   tail.on('line', (data) => {
     core.info(data)
@@ -868,35 +939,58 @@ const run = (callback) => {
       connected = true
       tail.unwatch()
       clearTimeout(timer)
-      const pid = fs.readFileSync('openvpn.pid', 'utf8').trim()
-      core.info(`VPN connected successfully. Daemon PID: ${pid}`)
-      core.setOutput('vpn_pid', pid)
-      callback(pid)
+      core.info('VPN connected successfully!')
+      callback(process.pid)
     }
 
-    // Check for specific errors
-    if (data.includes('TLS Error') || data.includes('AUTH_FAILED') || data.includes('connection failed')) {
-      errorDetected = true
-      core.setFailed(`VPN connection error: ${data}`)
+    if (data.includes('TLS Error') || data.includes('AUTH_FAILED') || 
+        data.includes('connection failed') || data.includes('exiting')) {
       tail.unwatch()
       clearTimeout(timer)
+      core.setFailed(`VPN connection failed: ${data}`)
+
+      // Kill the process if it's still running
+      try {
+        if (openvpnProcess) {
+          openvpnProcess.kill('SIGTERM')
+        }
+      } catch (e) {
+        // Ignore cleanup errors
+      }
     }
   })
 
-  // Increase timeout to 120 seconds to account for slower connections
   const timer = setTimeout(() => {
-    if (!connected && !errorDetected) {
-      core.setFailed('VPN connection timed out after 120 seconds.')
+    if (!connected) {
+      core.setFailed('VPN connection timed out after 120 seconds')
       tail.unwatch()
 
-      // Try to kill any hanging process
       try {
-        exec('sudo pkill openvpn || true')
+        if (openvpnProcess) {
+          openvpnProcess.kill('SIGTERM')
+        }
+        exec('sudo pkill -f openvpn || true')
       } catch (e) {
-        // Ignore errors in cleanup
+        // Ignore cleanup errors
+      }
+
+      // Suggest TCP fallback if UDP fails
+      if (vpnProto.toLowerCase() === 'udp') {
+        core.info('Try adding "proto tcp-client" to your config if UDP is blocked')
       }
     }
   }, 120000)
+
+  // Handle process exit
+  openvpnProcess.on('close', (code) => {
+    if (!connected && code !== 0) {
+      core.info(`OpenVPN process exited with code ${code}`)
+      if (!tail.destroyed) {
+        tail.unwatch()
+      }
+      clearTimeout(timer)
+    }
+  })
 }
 
 module.exports = run
