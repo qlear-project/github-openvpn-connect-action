@@ -124,7 +124,7 @@ function testVpnConnection(ip, port) {
   try {
     // Test with ping (if ICMP is allowed)
     core.info("Testing ping connectivity...");
-    const pingResult = execSync(`ping -c 4 -W 2 ${ip}`, { encoding: 'utf8' });
+    const pingResult = exec(`ping -c 4 -W 2 ${ip}`, { encoding: 'utf8' });
     core.info(`Ping test result:\n${pingResult}`);
 
     // Test TCP connectivity to the port
@@ -156,7 +156,7 @@ function testVpnConnection(ip, port) {
     if (port === '80' || port === '443') {
       const protocol = port === '443' ? 'https' : 'http';
       try {
-        const curlResult = execSync(`curl -s -I --connect-timeout 5 ${protocol}://${ip}`, { encoding: 'utf8' });
+        const curlResult = exec(`curl -s -I --connect-timeout 5 ${protocol}://${ip}`, { encoding: 'utf8' });
         core.info(`HTTP test result:\n${curlResult.split('\n')[0]}`);
       } catch (curlError) {
         core.info(`HTTP test failed (expected for non-web services): ${curlError.message}`);
