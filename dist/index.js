@@ -25265,6 +25265,11 @@ const run = (callback) => {
   fs.writeFileSync("openvpn.log", "");
   const tail = new Tail("openvpn.log");
 
+  // Test connection to the VPN IP
+  if (testConnection === "true" && vpnIp) {
+    testVpnConnection(vpnIp, vpnPort);
+  }
+
   try {
     exec(`sudo openvpn --config ${configFile} --daemon --log openvpn.log --writepid openvpn.pid`);
   } catch (error) {
@@ -25281,10 +25286,10 @@ const run = (callback) => {
       const pid = fs.readFileSync("openvpn.pid", "utf8").trim();
       core.info(`VPN connected successfully. Daemon PID: ${pid}`);
 
-      // Test connection to the VPN IP
-      if (testConnection === "true" && vpnIp) {
-        testVpnConnection(vpnIp, vpnPort);
-      }
+      // // Test connection to the VPN IP
+      // if (testConnection === "true" && vpnIp) {
+      //   testVpnConnection(vpnIp, vpnPort);
+      // }
 
       callback(pid);
     }
