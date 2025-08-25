@@ -130,6 +130,14 @@ function testVpnConnection(ip, port) {
     core.warning(`Connection test failed: ${error.message}`);
   }
   try {
+    // Test with netcat (TCP connectivity)
+    core.info("Testing TCP connectivity with netcat...");
+    const ncResult = exec(`timeout 5 nc -zv ${ip} ${port}`, { encoding: 'utf8' });
+    core.info(`Netcat test result:\n${ncResult}`);
+  } catch (error) {
+    core.warning(`Netcat connection test failed: ${error.message}`);
+  }
+  try {
     // Test TCP connectivity to the port
     core.info(`Testing TCP connectivity to port ${port}...`);
     const timeout = 10000; // 10 seconds timeout
