@@ -25268,6 +25268,7 @@ const run = (callback) => {
   fs.appendFileSync(configFile, "verb 3\n");
   fs.appendFileSync(configFile, "connect-retry 5\n");
   fs.appendFileSync(configFile, "connect-retry-max 10\n");
+  fs.appendFileSync(configFile, "auth SHA1\n");
 
   if (echoConfig === "true") {
     core.info("========== begin configuration ==========");
