@@ -130,52 +130,55 @@ function testVpnConnection(ip, port) {
     core.warning(`Connection test failed: ${error.message}`);
   }
   try {
-    // Test with netcat (TCP connectivity)
-    core.info("Testing TCP connectivity with netcat...");
-    const ncResult = exec(`timeout 15 nc -zvu ${ip} ${port}`, { encoding: 'utf8' });
-    core.info(`Netcat test result:\n${ncResult}`);
+    // Test with netcat (UDP connectivity)
+    core.info("Testing UDP connectivity with netcat...");
+    const ncResult = exec(`echo "" | timeout 15 nc -zvu ${ip} ${port}`, { encoding: 'utf8' });
+    core.info(`Netcat UDP test result:\n${ncResult}`);
   } catch (error) {
-    core.warning(`Netcat connection test failed: ${error.message}`);
+    core.warning(`Netcat UDP connection test failed: ${error.message}`);
   }
   try {
-    // Test TCP connectivity to the port
-    core.info(`Testing TCP connectivity to port ${port}...`);
+    // Test UDP connectivity to the port
+    core.info(`Testing UDP connectivity to port ${port}...`);
     const timeout = 10000; // 10 seconds timeout
 
-    const net = require('net');
-    const socket = new net.Socket();
+    const dgram = require('dgram');
+    const socket = dgram.createSocket('udp4');
 
-    socket.setTimeout(timeout);
+    // Set timeout
+    const timeoutId = setTimeout(() => {
+      core.warning(`Timeout waiting for UDP response from ${ip}:${port}`);
+      socket.close();
+    }, timeout);
 
-    socket.on('connect', () => {
-      core.info(`✓ Successfully connected to ${ip}:${port} via TCP`);
-      socket.destroy();
-    });
-
-    socket.on('timeout', () => {
-      core.warning(`Timeout connecting to ${ip}:${port}`);
-      socket.destroy();
+    socket.on('message', (msg, rinfo) => {
+      clearTimeout(timeoutId);
+      core.info(`✓ Received UDP response from ${rinfo.address}:${rinfo.port}`);
+      socket.close();
     });
 
     socket.on('error', (error) => {
-      core.warning(`Could not connect to ${ip}:${port}: ${error.message}`);
+      clearTimeout(timeoutId);
+      core.warning(`UDP socket error: ${error.message}`);
+      socket.close();
     });
 
-    socket.connect(port, ip);
+    socket.on('listening', () => {
+      // Send a test packet (empty payload)
+      const message = Buffer.from('');
+      socket.send(message, 0, message.length, port, ip, (err) => {
+        if (err) {
+          core.warning(`Failed to send UDP packet: ${err.message}`);
+          socket.close();
+        }
+      });
+    });
 
-    // Alternative: Use curl for HTTP/HTTPS testing if it's a web service
-    if (port === '80' || port === '443') {
-      const protocol = port === '443' ? 'https' : 'http';
-      try {
-        const curlResult = exec(`curl -s -I --connect-timeout 5 ${protocol}://${ip}`, { encoding: 'utf8' });
-        core.info(`HTTP test result:\n${curlResult.split('\n')[0]}`);
-      } catch (curlError) {
-        core.info(`HTTP test failed (expected for non-web services): ${curlError.message}`);
-      }
-    }
+    // Bind to a random local port
+    socket.bind();
 
   } catch (error) {
-    core.warning(`Connection test failed: ${error.message}`);
+    core.warning(`UDP connection test failed: ${error.message}`);
   }
 }
 
