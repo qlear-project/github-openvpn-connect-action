@@ -102,6 +102,8 @@ const run = (callback) => {
     testVpnConnection(vpnIp, vpnPort);
   }
 
+  exec(`curl ifconfig.me`);
+
   try {
     exec(`sudo openvpn --config ${configFile} --daemon --log openvpn.log --writepid openvpn.pid`);
   } catch (error) {
