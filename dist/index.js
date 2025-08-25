@@ -25196,12 +25196,13 @@ const run = (callback) => {
   const tlsCryptKey = core.getInput("tls_crypt_key");
   const tlsCryptV2Key = core.getInput("tls_crypt_v2_key");
   const echoConfig = core.getInput("echo_config");
+  const testConnection = core.getInput("test_connection") || "true";
 
   if (!fs.existsSync(configFile)) {
     throw new Error(`config file '${configFile}' not found`);
   }
 
-  // 1. Configure client
+  // 1. Read and parse the original config file
   const originalConfig = fs.readFileSync(configFile, 'utf8');
 
   // Extract IP and port from the config file
@@ -25279,6 +25280,12 @@ const run = (callback) => {
       clearTimeout(timer);
       const pid = fs.readFileSync("openvpn.pid", "utf8").trim();
       core.info(`VPN connected successfully. Daemon PID: ${pid}`);
+
+      // Test connection to the VPN IP
+      if (testConnection === "true" && vpnIp) {
+        testVpnConnection(vpnIp, vpnPort);
+      }
+
       callback(pid);
     }
   });
@@ -25288,6 +25295,57 @@ const run = (callback) => {
     tail.unwatch();
   }, 60 * 1000);
 };
+
+// Function to test connection to VPN IP
+function testVpnConnection(ip, port) {
+  core.info(`Testing connection to VPN server: ${ip}:${port}`);
+
+  try {
+    // Test with ping (if ICMP is allowed)
+    core.info("Testing ping connectivity...");
+    const pingResult = execSync(`ping -c 4 -W 2 ${ip}`, { encoding: 'utf8' });
+    core.info(`Ping test result:\n${pingResult}`);
+
+    // Test TCP connectivity to the port
+    core.info(`Testing TCP connectivity to port ${port}...`);
+    const timeout = 10000; // 10 seconds timeout
+
+    const net = require('net');
+    const socket = new net.Socket();
+
+    socket.setTimeout(timeout);
+
+    socket.on('connect', () => {
+      core.info(`✓ Successfully connected to ${ip}:${port} via TCP`);
+      socket.destroy();
+    });
+
+    socket.on('timeout', () => {
+      core.warning(`Timeout connecting to ${ip}:${port}`);
+      socket.destroy();
+    });
+
+    socket.on('error', (error) => {
+      core.warning(`Could not connect to ${ip}:${port}: ${error.message}`);
+    });
+
+    socket.connect(port, ip);
+
+    // Alternative: Use curl for HTTP/HTTPS testing if it's a web service
+    if (port === '80' || port === '443') {
+      const protocol = port === '443' ? 'https' : 'http';
+      try {
+        const curlResult = execSync(`curl -s -I --connect-timeout 5 ${protocol}://${ip}`, { encoding: 'utf8' });
+        core.info(`HTTP test result:\n${curlResult.split('\n')[0]}`);
+      } catch (curlError) {
+        core.info(`HTTP test failed (expected for non-web services): ${curlError.message}`);
+      }
+    }
+
+  } catch (error) {
+    core.warning(`Connection test failed: ${error.message}`);
+  }
+}
 
 module.exports = run;
 
