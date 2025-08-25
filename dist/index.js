@@ -804,63 +804,99 @@ const run = (callback) => {
     throw new Error(`config file '${configFile}' not found`)
   }
 
-  // 1. Configure client
+  // Read original config and create a modified version
+  const originalConfig = fs.readFileSync(configFile, 'utf8')
+  let modifiedConfig = originalConfig + '\n# ----- modified by action -----\n'
 
-  fs.appendFileSync(configFile, '\n# ----- modified by action -----\n')
+  // // Add modern cipher settings to prevent negotiation issues
+  // modifiedConfig += 'data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305\n'
+  // modifiedConfig += 'data-ciphers-fallback AES-256-CBC\n'
+
+  // // Add certificate verification if missing
+  // if (!modifiedConfig.includes('verify-x509-name') && !modifiedConfig.includes('remote-cert-tls')) {
+  //   modifiedConfig += 'remote-cert-tls server\n'
+  // }
 
   // username & password auth
   if (username && password) {
-    fs.appendFileSync(configFile, 'auth-user-pass up.txt\n')
+    modifiedConfig += 'auth-user-pass up.txt\n'
     fs.writeFileSync('up.txt', [username, password].join('\n'))
     fs.chmodSync('up.txt', 0o600)
   }
 
   // client certificate auth
   if (clientKey) {
-    fs.appendFileSync(configFile, 'key client.key\n')
+    modifiedConfig += 'key client.key\n'
     fs.writeFileSync('client.key', clientKey)
     fs.chmodSync('client.key', 0o600)
   }
 
   if (tlsAuthKey) {
-    fs.appendFileSync(configFile, 'tls-auth ta.key 1\n')
+    modifiedConfig += 'tls-auth ta.key 1\n'
     fs.writeFileSync('ta.key', tlsAuthKey)
     fs.chmodSync('ta.key', 0o600)
   }
 
+  // Write the modified config to a new file
+  const tempConfigFile = 'modified_config.ovpn'
+  fs.writeFileSync(tempConfigFile, modifiedConfig)
+
   core.info('========== begin configuration ==========')
-  core.info(fs.readFileSync(configFile, 'utf8'))
+  core.info(modifiedConfig)
   core.info('=========== end configuration ===========')
 
-  // 2. Run openvpn
-
-  // prepare log file
+  // 2. Run openvpn with increased timeout
   fs.writeFileSync('openvpn.log', '')
   const tail = new Tail('openvpn.log')
 
   try {
-    exec(`sudo openvpn --config ${configFile} --daemon --log openvpn.log --writepid openvpn.pid`)
+    // Use the modified config and add connection timeout options
+    exec(`sudo openvpn --config ${tempConfigFile} --daemon --log openvpn.log --writepid openvpn.pid --connect-timeout 120 --connect-retry 5 --connect-retry-max 3`)
   } catch (error) {
     core.error(fs.readFileSync('openvpn.log', 'utf8'))
     tail.unwatch()
     throw error
   }
 
+  let connected = false;
+  let errorDetected = false;
+
   tail.on('line', (data) => {
     core.info(data)
+
     if (data.includes('Initialization Sequence Completed')) {
+      connected = true
       tail.unwatch()
       clearTimeout(timer)
       const pid = fs.readFileSync('openvpn.pid', 'utf8').trim()
       core.info(`VPN connected successfully. Daemon PID: ${pid}`)
+      core.setOutput('vpn_pid', pid)
       callback(pid)
+    }
+
+    // Check for specific errors
+    if (data.includes('TLS Error') || data.includes('AUTH_FAILED') || data.includes('connection failed')) {
+      errorDetected = true
+      core.setFailed(`VPN connection error: ${data}`)
+      tail.unwatch()
+      clearTimeout(timer)
     }
   })
 
+  // Increase timeout to 120 seconds to account for slower connections
   const timer = setTimeout(() => {
-    core.setFailed('VPN connection failed.')
-    tail.unwatch()
-  }, 15000 * 4)
+    if (!connected && !errorDetected) {
+      core.setFailed('VPN connection timed out after 120 seconds.')
+      tail.unwatch()
+
+      // Try to kill any hanging process
+      try {
+        exec('sudo pkill openvpn || true')
+      } catch (e) {
+        // Ignore errors in cleanup
+      }
+    }
+  }, 120000)
 }
 
 module.exports = run
