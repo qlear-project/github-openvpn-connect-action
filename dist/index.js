@@ -25202,10 +25202,30 @@ const run = (callback) => {
   }
 
   // 1. Configure client
-  const originalConfig = fs.readFileSync(configFile, 'utf8')
-  let modifiedConfig = originalConfig + '\n# ----- modified by action -----\n'
+  const originalConfig = fs.readFileSync(configFile, 'utf8');
 
-  fs.appendFileSync(configFile, "\n# ----- modified by action -----\n");
+  // Extract IP and port from the config file
+  let vpnIp = '';
+  let vpnPort = '';
+
+  // Parse the remote line to get IP and port
+  const remoteMatch = originalConfig.match(/^remote\s+(\S+)\s+(\d+)/m);
+  if (remoteMatch) {
+    vpnIp = remoteMatch[1];
+    vpnPort = remoteMatch[2];
+    core.info(`Found VPN server: ${vpnIp}:${vpnPort}`);
+  } else {
+    core.warning('No remote server found in config file');
+  }
+
+  // Set outputs for IP and port so they can be used in subsequent steps
+  core.setOutput('vpn_ip', vpnIp);
+  core.setOutput('vpn_port', vpnPort);
+
+  let modifiedConfig = originalConfig + '\n# ----- modified by action -----\n';
+
+  // Write the modified config back to file
+  fs.writeFileSync(configFile, modifiedConfig);
 
   // username & password auth
   if (username && password) {
@@ -25239,9 +25259,8 @@ const run = (callback) => {
     core.info(fs.readFileSync(configFile, "utf8"));
     core.info("=========== end configuration ===========");
   }
-  // 2. Run openvpn
 
-  // prepare log file
+  // 2. Run openvpn
   fs.writeFileSync("openvpn.log", "");
   const tail = new Tail("openvpn.log");
 
@@ -25264,7 +25283,6 @@ const run = (callback) => {
     }
   });
 
-  // Increase timeout to account for potential retries
   const timer = setTimeout(() => {
     core.setFailed("VPN connection failed.");
     tail.unwatch();
